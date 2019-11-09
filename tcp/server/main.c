@@ -10,24 +10,30 @@
 
 ssize_t n;
 
-int clients_length;
-
-struct Client {
+typedef struct Client {
     int fd;
     char name[10];
-};
+    struct Client *next;
+} ClientLinkedList;
 
-struct Client *clients;
+ClientLinkedList *init_list(int fd) {
+    ClientLinkedList *temp = (ClientLinkedList *) malloc(sizeof(ClientLinkedList));
+    temp->fd = fd;
+    temp->next = NULL;
+    return temp;
+}
+
+ClientLinkedList *first, *last;
 
 void handle_connection(void *arg);
-int receiveMessage(int fd, char *buffer, int bufferLength);
-int sendMessagesToAllClients(int authorFd, char *buffer, int bufferLength);
+void receiveMessage(ClientLinkedList *client, char *buffer, int bufferLength);
+void sendMessagesToAllClients(ClientLinkedList *author, char *buffer, int bufferLength);
+void exit_and_free(ClientLinkedList *client);
 
 int main(int argc, char *argv[]) {
     int sockfd, newsockfd;
     uint16_t portno;
     unsigned int clilen;
-    clients_length = 0;
 
     struct sockaddr_in serv_addr, cli_addr;
 
@@ -41,7 +47,7 @@ int main(int argc, char *argv[]) {
 
     /* Initialize socket structure */
     bzero((char *) &serv_addr, sizeof(serv_addr));
-    portno = 5002;
+    portno = 5001;
 
     serv_addr.sin_family = AF_INET;
     serv_addr.sin_addr.s_addr = INADDR_ANY;
@@ -56,86 +62,93 @@ int main(int argc, char *argv[]) {
     listen(sockfd, 5);
     clilen = sizeof(cli_addr);
 
-    clients = (struct Client *) malloc(sizeof(struct Client));
+    first = init_list(sockfd);
+    last = first;
 
     while (1) {
+        ClientLinkedList *newClient = init_list(sockfd);
         newsockfd = accept(sockfd, (struct sockaddr *) &cli_addr, &clilen);
-
 
         if (newsockfd < 0) {
             perror("ERROR on accept");
             close(sockfd);
             exit(1);
         }
-        printf("%d\n", newsockfd);
-        clients[clients_length].fd = newsockfd;
-        printf("%d\n" ,clients[clients_length].fd);
-        fflush(stdout);
+
+        newClient->fd = newsockfd;
+        last->next = newClient;
+        last = newClient;
+
         pthread_t tid;
-        if (pthread_create(&tid, NULL, (void *) handle_connection, &clients_length) != 0) {
+        if (pthread_create(&tid, NULL, (void *) handle_connection, newClient) != 0) {
             printf("thread has not created");
             close(sockfd);
             exit(1);
         }
-        sleep(1);
-        clients_length++;
-        clients = realloc(clients, clients_length * sizeof(struct Client));
-        
     }
-
-
 }
 
 void handle_connection(void *arg) {
-    int index = *(int *) arg;
-    printf("%d\n", index);
-    struct Client *temp = &clients[index];
-    printf("%d\n", temp->fd);
-    fflush(stdout);
-    char buffer[10];
+    ClientLinkedList *client = (ClientLinkedList *) arg;
+    char name[10];
     printf("new Client connected\n");
-    if (read(temp->fd, buffer, sizeof(buffer)) < 0) {
-        printf("dfvbkljbdfv");
+    if ((n = read(client->fd, name, sizeof(name))) < 0) {
+        printf("ERROR reading from socket");
+    } else if (n == 0) {
+        exit_and_free(client);
     }
-    strncpy(temp->name, buffer, 10);
-    printf("%s\n", temp->name);
+    strncpy(client->name, name, 10);
+    printf("%s\n connected to server", client->name);
     fflush(stdout);
-    // n = receiveMessage(temp->fd, buffer, sizeof(buffer));
 
     char message[255];
-
     while (1) {
-        n = receiveMessage(temp->fd, message, sizeof(message));
-        sendMessagesToAllClients(temp->fd, message, sizeof(message));
+        receiveMessage(client, message, sizeof(message));
+        sendMessagesToAllClients(client, message, sizeof(message));
     }
 
 }
 
-int receiveMessage(int fd, char *buffer, int bufferLength) {
+void receiveMessage(ClientLinkedList *client, char *buffer, int bufferLength) {
     bzero(buffer, bufferLength);
     int message;
-    message = read(fd, buffer, bufferLength);
-
+    message = read(client->fd, buffer, bufferLength);
     if (message < 0 ) {
-        close(fd);
         perror("ERROR reading from socket");
         exit(1);
+    } else if (message == 0) {
+        exit_and_free(client);
     }
-
-    return message;
 }
 
-int sendMessagesToAllClients(int authorFd, char *buffer, int bufferLength) {
-    for (int i = 0; i < clients_length; i++) {
-        if (clients[i].fd != authorFd) {
-            n = write(clients[i].fd, buffer, bufferLength);
+void sendMessagesToAllClients(ClientLinkedList *author, char *buffer, int bufferLength) {
+    ClientLinkedList *receiver = first->next;
+    while (receiver != NULL) {
+        if (receiver != author) {
+            n = write(receiver->fd, buffer, bufferLength);
             if (n < 0) {
                 perror("ERROR writing to socket");
                 exit(1);
             }
         }
+        receiver = receiver->next;
     }
+}
 
-
-    return n;
+void exit_and_free(ClientLinkedList *client) {
+    close(client->fd);
+    ClientLinkedList *temp = first;
+    while (temp->next != client) {
+        temp = temp->next;
+    }
+    if (client->next == NULL) {
+        last = temp;
+        temp->next = NULL;
+        free(client);
+        pthread_exit(NULL);
+    } else {
+        temp->next = client->next;
+        free(client);
+        pthread_exit(NULL);
+    }
 }

@@ -86,11 +86,6 @@ void sendMessages(void *arg) {
         n = 0;
         buffer_size = getline(&buffer, &n, stdin);
 
-/*        if (write(fd, &buffer_size, sizeof(int)) < 0) {
-            perror("ERROR writing to socket");
-            exit(1);
-        }*/
-
         if (write(fd, buffer, buffer_size) < 0) {
             perror("ERROR writing to socket");
             exit(1);
