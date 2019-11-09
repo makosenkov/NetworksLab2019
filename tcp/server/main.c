@@ -1,17 +1,10 @@
-#include <stdio.h>
-#include <stdlib.h>
-
-#include <netinet/in.h>
-#include <unistd.h>
-
-#include <string.h>
-#include <pthread.h>
+#include "../common.h"
 
 ssize_t n;
 
 typedef struct Client {
     int fd;
-    char name[10];
+    char *name;
     struct Client *next;
 } ClientLinkedList;
 
@@ -24,11 +17,13 @@ ClientLinkedList *init_list(int fd) {
 
 ClientLinkedList *first, *last;
 
+pthread_mutex_t mutex;
+
 void handle_connection(void *arg);
-void handleMessage(ClientLinkedList *client, char *buffer, int bufferLength);
+void handleMessage(ClientLinkedList *client);
 void sendMessagesToAllClients(ClientLinkedList *author, char *buffer, int bufferLength);
 void exit_and_free(ClientLinkedList *client);
-void delete_line_break(char *str);
+void handleName(ClientLinkedList *client);
 
 int main(int argc, char *argv[]) {
     int sockfd, newsockfd;
@@ -47,7 +42,7 @@ int main(int argc, char *argv[]) {
 
     /* Initialize socket structure */
     bzero((char *) &serv_addr, sizeof(serv_addr));
-    portno = 5001;
+    portno = 5002;
 
     serv_addr.sin_family = AF_INET;
     serv_addr.sin_addr.s_addr = INADDR_ANY;
@@ -65,6 +60,13 @@ int main(int argc, char *argv[]) {
     first = init_list(sockfd);
     last = first;
 
+    if (pthread_mutex_init(&mutex, NULL) != 0) {
+        perror("ERROR creating mutex");
+        exit(1);
+    }
+
+    pthread_t tid;
+
     while (1) {
         ClientLinkedList *newClient = init_list(sockfd);
         newsockfd = accept(sockfd, (struct sockaddr *) &cli_addr, &clilen);
@@ -79,68 +81,104 @@ int main(int argc, char *argv[]) {
         last->next = newClient;
         last = newClient;
 
-        pthread_t tid;
         if (pthread_create(&tid, NULL, (void *) handle_connection, newClient) != 0) {
             printf("thread has not created");
             close(sockfd);
             exit(1);
         }
     }
+
 }
 
 void handle_connection(void *arg) {
     ClientLinkedList *client = (ClientLinkedList *) arg;
-    char name[10];
-    printf("new Client connected\n");
-    if ((n = read(client->fd, name, sizeof(name))) < 0) {
-        printf("ERROR reading from socket");
-    } else if (n == 0) {
-        exit_and_free(client);
-    }
-    delete_line_break(name);
-    strncpy(client->name, name, 10);
-    printf("%s connected to server\n", client->name);
-    char name_buffer[50];
-    sprintf(name_buffer, "%s connected to server\n", client->name);
-    delete_line_break(name_buffer);
-    sendMessagesToAllClients(client, name_buffer, 50);
-    fflush(stdout);
+    handleName(client);
 
-    char message[255];
     while (1) {
-        handleMessage(client, message, sizeof(message));
+        handleMessage(client);
     }
 }
 
-void handleMessage(ClientLinkedList *client, char *buffer, int bufferLength) {
-    bzero(buffer, bufferLength);
-    int message;
-    message = read(client->fd, buffer, bufferLength);
-    if (message < 0 ) {
-        perror("ERROR reading from socket");
-        exit(1);
-    } else if (message == 0) {
+void handleName(ClientLinkedList *client) {
+    char *name_buffer;
+    int name_size = 0;
+    int r;
+    printf("new Client connected\n");
+    if ((r = read(client->fd, &name_size, sizeof(int))) < 0) {
+        printf("ERROR reading from socket");
+    } else if (r == 0) {
         exit_and_free(client);
     }
-    delete_line_break(buffer);
-    if (strcmp(buffer, "/exit") == 0) {
-        printf("%s disconnected from server", client->name);
-        char name_buffer[50];
-        sprintf(name_buffer, "%s left the chat", client->name);
-        sendMessagesToAllClients(client, name_buffer, 50);
+    client->name = (char *) malloc(name_size);
+    name_buffer = (char *) malloc(name_size + 25 * sizeof(char));
+
+    if ((r = read_bytes(client->fd, name_buffer, name_size)) < 0) {
+        perror("ERROR reading from socket");
+        exit(1);
+    } else if(r == 0) {
         exit_and_free(client);
     } else {
-        sendMessagesToAllClients(client, buffer, bufferLength);
+        delete_line_break(name_buffer);
+        strncpy(client->name, name_buffer, name_size);
+        printf("%s connected to server\n", client->name);
+
+        sprintf(name_buffer, "%s connected to server\n", client->name);
+        delete_line_break(name_buffer);
+        sendMessagesToAllClients(client, name_buffer, name_size + 25 * sizeof(char));
+        fflush(stdout);
+    }
+}
+
+void handleMessage(ClientLinkedList *client) {
+    char *message_buffer;
+    int r;
+    int message_size = 0;
+    r = read(client->fd, &message_size, sizeof(int));
+    if (r < 0 ) {
+        perror("ERROR reading from socket");
+        exit(1);
+    } else if (r == 0) {
+        exit_and_free(client);
+    }
+
+    message_buffer = (char *) malloc(message_size);
+
+    if ((r = read_bytes(client->fd, message_buffer, message_size)) < 0) {
+        perror("ERROR reading from socket");
+        exit(1);
+    } else if(r == 0) {
+        exit_and_free(client);
+    } else {
+        delete_line_break(message_buffer);
+        if (strcmp(message_buffer, "/exit") == 0) {
+            printf("%s disconnected from server\n", client->name);
+            char *name_buffer;
+            u_int32_t connected_name_size = sizeof(client->name) + 15 * sizeof(char);
+            name_buffer = (char *) malloc(connected_name_size);
+            sprintf(name_buffer, "%s left the chat", client->name);
+            sendMessagesToAllClients(client, name_buffer, connected_name_size);
+            exit_and_free(client);
+        } else {
+            char *message;
+            u_int32_t full_message_size = message_size + sizeof(client->name) + 2 * sizeof(char);
+            message = (char *) malloc(full_message_size);
+            sprintf(message, "%s: %s", client->name, message_buffer);
+            sendMessagesToAllClients(client, message, full_message_size);
+        }
     }
 }
 
 void sendMessagesToAllClients(ClientLinkedList *author, char *buffer, int bufferLength) {
     ClientLinkedList *receiver = first->next;
-    char message[255];
-    sprintf(message, "%s: %s", author->name, buffer);
+    pthread_mutex_lock(&mutex);
     while (receiver != NULL) {
         if (receiver != author) {
-            n = write(receiver->fd, message, bufferLength);
+            n = write(receiver->fd, &bufferLength, sizeof(int));
+            if (n < 0) {
+                perror("ERROR writing to socket");
+                exit(1);
+            }
+            n = write(receiver->fd, buffer, bufferLength);
             if (n < 0) {
                 perror("ERROR writing to socket");
                 exit(1);
@@ -148,6 +186,7 @@ void sendMessagesToAllClients(ClientLinkedList *author, char *buffer, int buffer
         }
         receiver = receiver->next;
     }
+    pthread_mutex_unlock(&mutex);
 }
 
 void exit_and_free(ClientLinkedList *client) {
@@ -166,13 +205,6 @@ void exit_and_free(ClientLinkedList *client) {
         free(client);
         pthread_exit(NULL);
     }
+
 }
 
-void delete_line_break(char *str) {
-    for (int i = 0; i < (int) strlen(str); i++) {
-        if (str[i] == '\n') {
-            str[i] = '\0';
-            break;
-        }
-    }
-}

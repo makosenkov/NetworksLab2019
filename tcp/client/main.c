@@ -1,23 +1,19 @@
-#include <stdio.h>
-#include <stdlib.h>
-
-#include <netdb.h>
-#include <netinet/in.h>
-#include <unistd.h>
-
-#include <string.h>
-#include <pthread.h>
+#include "../common.h"
 
 void sendMessages(void *arg);
+
 void receiveMessages(void *arg);
-void delete_line_break(char *str);
+
+size_t n;
 
 int main(int argc, char *argv[]) {
     int sockfd;
     uint16_t portno;
     struct sockaddr_in serv_addr;
     struct hostent *server;
-    char name[10];
+    char *name;
+    int name_size;
+    n = 0;
 
     if (argc < 3) {
         fprintf(stderr, "usage %s hostname port\n", argv[0]);
@@ -53,9 +49,15 @@ int main(int argc, char *argv[]) {
     }
 
     printf("Enter your name:");
-    bzero(name, sizeof(name));
-    fgets(name, sizeof(name), stdin);
-    if (write(sockfd, name, sizeof(name)) < 0) {
+
+    name_size = getline(&name, &n, stdin);
+
+    if (write(sockfd, &name_size, sizeof(int)) < 0) {
+        perror("ERROR writing to socket");
+        exit(1);
+    }
+
+    if (write(sockfd, name, name_size) < 0) {
         perror("ERROR writing to socket");
         exit(1);
     }
@@ -81,11 +83,15 @@ void sendMessages(void *arg) {
     int fd = *(int *) arg;
     char *buffer;
     int buffer_size;
-    size_t n;
     while (1) {
         buffer = NULL;
         n = 0;
         buffer_size = getline(&buffer, &n, stdin);
+
+        if (write(fd, &buffer_size, sizeof(int)) < 0) {
+            perror("ERROR writing to socket");
+            exit(1);
+        }
 
         if (write(fd, buffer, buffer_size) < 0) {
             perror("ERROR writing to socket");
@@ -103,24 +109,24 @@ void sendMessages(void *arg) {
 
 void receiveMessages(void *arg) {
     int fd = *(int *) arg;
-    char buffer[255];
+    char *buffer;
+    int buffer_size;
     while (1) {
-        bzero(buffer, 255);
+        buffer_size = 0;
 
-        if (read(fd, buffer, 255) < 0) {
+        if (read(fd, &buffer_size, sizeof(int)) < 0) {
+            perror("ERROR reading from socket");
+            exit(1);
+        }
+
+        buffer = (char *) malloc(buffer_size);
+        if (read(fd, buffer, buffer_size) < 0) {
             perror("ERROR reading from socket");
             exit(1);
         }
 
         printf("%s\n", buffer);
+        free(buffer);
     }
 }
 
-void delete_line_break(char *str) {
-    for (int i = 0; i < (int) strlen(str); i++) {
-        if (str[i] == '\n') {
-            str[i] = '\0';
-            break;
-        }
-    }
-}

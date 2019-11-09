@@ -4,7 +4,7 @@ project(NetworksLab20191)
 
 find_library(PTHREAD_LIBRARY pthread)
 
-add_executable(client client/main.c)
+add_executable(client client/main.c common.h)
 add_executable(server server/main.c)
 
 
