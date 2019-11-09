@@ -12,7 +12,7 @@ int main(int argc, char *argv[]) {
     struct sockaddr_in serv_addr;
     struct hostent *server;
     char *name;
-    int name_size;
+    u_int32_t name_size;
     n = 0;
 
     if (argc < 3) {
@@ -52,7 +52,7 @@ int main(int argc, char *argv[]) {
 
     name_size = getline(&name, &n, stdin);
 
-    if (write(sockfd, &name_size, sizeof(int)) < 0) {
+    if (write(sockfd, &name_size, sizeof(u_int32_t)) < 0) {
         perror("ERROR writing to socket");
         exit(1);
     }
@@ -82,13 +82,13 @@ int main(int argc, char *argv[]) {
 void sendMessages(void *arg) {
     int fd = *(int *) arg;
     char *buffer;
-    int buffer_size;
+    u_int32_t buffer_size;
     while (1) {
         buffer = NULL;
         n = 0;
         buffer_size = getline(&buffer, &n, stdin);
 
-        if (write(fd, &buffer_size, sizeof(int)) < 0) {
+        if (write(fd, &buffer_size, sizeof(u_int32_t)) < 0) {
             perror("ERROR writing to socket");
             exit(1);
         }
@@ -110,11 +110,11 @@ void sendMessages(void *arg) {
 void receiveMessages(void *arg) {
     int fd = *(int *) arg;
     char *buffer;
-    int buffer_size;
+    u_int32_t buffer_size;
     while (1) {
         buffer_size = 0;
 
-        if (read(fd, &buffer_size, sizeof(int)) < 0) {
+        if (read(fd, &buffer_size, sizeof(u_int32_t)) < 0) {
             perror("ERROR reading from socket");
             exit(1);
         }

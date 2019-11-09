@@ -21,7 +21,7 @@ pthread_mutex_t mutex;
 
 void handle_connection(void *arg);
 void handleMessage(ClientLinkedList *client);
-void sendMessagesToAllClients(ClientLinkedList *author, char *buffer, int bufferLength);
+void sendMessagesToAllClients(ClientLinkedList *author, char *buffer, u_int32_t bufferLength);
 void exit_and_free(ClientLinkedList *client);
 void handleName(ClientLinkedList *client);
 
@@ -101,10 +101,10 @@ void handle_connection(void *arg) {
 
 void handleName(ClientLinkedList *client) {
     char *name_buffer;
-    int name_size = 0;
+    u_int32_t name_size = 0;
     int r;
     printf("new Client connected\n");
-    if ((r = read(client->fd, &name_size, sizeof(int))) < 0) {
+    if ((r = read(client->fd, &name_size, sizeof(u_int32_t))) < 0) {
         printf("ERROR reading from socket");
     } else if (r == 0) {
         exit_and_free(client);
@@ -132,8 +132,8 @@ void handleName(ClientLinkedList *client) {
 void handleMessage(ClientLinkedList *client) {
     char *message_buffer;
     int r;
-    int message_size = 0;
-    r = read(client->fd, &message_size, sizeof(int));
+    u_int32_t message_size = 0;
+    r = read(client->fd, &message_size, sizeof(u_int32_t));
     if (r < 0 ) {
         perror("ERROR reading from socket");
         exit(1);
@@ -168,12 +168,12 @@ void handleMessage(ClientLinkedList *client) {
     }
 }
 
-void sendMessagesToAllClients(ClientLinkedList *author, char *buffer, int bufferLength) {
+void sendMessagesToAllClients(ClientLinkedList *author, char *buffer, u_int32_t bufferLength) {
     ClientLinkedList *receiver = first->next;
     pthread_mutex_lock(&mutex);
     while (receiver != NULL) {
         if (receiver != author) {
-            n = write(receiver->fd, &bufferLength, sizeof(int));
+            n = write(receiver->fd, &bufferLength, sizeof(u_int32_t));
             if (n < 0) {
                 perror("ERROR writing to socket");
                 exit(1);
