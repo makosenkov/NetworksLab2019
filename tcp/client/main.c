@@ -10,9 +10,10 @@
 
 void sendMessages(void *arg);
 void receiveMessages(void *arg);
+void delete_line_break(char *str);
 
 int main(int argc, char *argv[]) {
-    int sockfd, n;
+    int sockfd;
     uint16_t portno;
     struct sockaddr_in serv_addr;
     struct hostent *server;
@@ -91,6 +92,7 @@ void sendMessages(void *arg) {
             exit(1);
         }
 
+        delete_line_break(buffer);
         if (strcmp(buffer, "/exit") == 0) {
             printf("Disconnected\n");
             close(fd);
@@ -111,5 +113,14 @@ void receiveMessages(void *arg) {
         }
 
         printf("%s\n", buffer);
+    }
+}
+
+void delete_line_break(char *str) {
+    for (int i = 0; i < (int) strlen(str); i++) {
+        if (str[i] == '\n') {
+            str[i] = '\0';
+            break;
+        }
     }
 }

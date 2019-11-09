@@ -1,7 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#include <netdb.h>
 #include <netinet/in.h>
 #include <unistd.h>
 
@@ -26,9 +25,10 @@ ClientLinkedList *init_list(int fd) {
 ClientLinkedList *first, *last;
 
 void handle_connection(void *arg);
-void receiveMessage(ClientLinkedList *client, char *buffer, int bufferLength);
+void handleMessage(ClientLinkedList *client, char *buffer, int bufferLength);
 void sendMessagesToAllClients(ClientLinkedList *author, char *buffer, int bufferLength);
 void exit_and_free(ClientLinkedList *client);
+void delete_line_break(char *str);
 
 int main(int argc, char *argv[]) {
     int sockfd, newsockfd;
@@ -97,19 +97,22 @@ void handle_connection(void *arg) {
     } else if (n == 0) {
         exit_and_free(client);
     }
+    delete_line_break(name);
     strncpy(client->name, name, 10);
-    printf("%s\n connected to server", client->name);
+    printf("%s connected to server\n", client->name);
+    char name_buffer[50];
+    sprintf(name_buffer, "%s connected to server\n", client->name);
+    delete_line_break(name_buffer);
+    sendMessagesToAllClients(client, name_buffer, 50);
     fflush(stdout);
 
     char message[255];
     while (1) {
-        receiveMessage(client, message, sizeof(message));
-        sendMessagesToAllClients(client, message, sizeof(message));
+        handleMessage(client, message, sizeof(message));
     }
-
 }
 
-void receiveMessage(ClientLinkedList *client, char *buffer, int bufferLength) {
+void handleMessage(ClientLinkedList *client, char *buffer, int bufferLength) {
     bzero(buffer, bufferLength);
     int message;
     message = read(client->fd, buffer, bufferLength);
@@ -119,13 +122,25 @@ void receiveMessage(ClientLinkedList *client, char *buffer, int bufferLength) {
     } else if (message == 0) {
         exit_and_free(client);
     }
+    delete_line_break(buffer);
+    if (strcmp(buffer, "/exit") == 0) {
+        printf("%s disconnected from server", client->name);
+        char name_buffer[50];
+        sprintf(name_buffer, "%s left the chat", client->name);
+        sendMessagesToAllClients(client, name_buffer, 50);
+        exit_and_free(client);
+    } else {
+        sendMessagesToAllClients(client, buffer, bufferLength);
+    }
 }
 
 void sendMessagesToAllClients(ClientLinkedList *author, char *buffer, int bufferLength) {
     ClientLinkedList *receiver = first->next;
+    char message[255];
+    sprintf(message, "%s: %s", author->name, buffer);
     while (receiver != NULL) {
         if (receiver != author) {
-            n = write(receiver->fd, buffer, bufferLength);
+            n = write(receiver->fd, message, bufferLength);
             if (n < 0) {
                 perror("ERROR writing to socket");
                 exit(1);
@@ -150,5 +165,14 @@ void exit_and_free(ClientLinkedList *client) {
         temp->next = client->next;
         free(client);
         pthread_exit(NULL);
+    }
+}
+
+void delete_line_break(char *str) {
+    for (int i = 0; i < (int) strlen(str); i++) {
+        if (str[i] == '\n') {
+            str[i] = '\0';
+            break;
+        }
     }
 }
