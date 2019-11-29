@@ -1,3 +1,7 @@
+#include <fcntl.h>
+#include <poll.h>
+#include <asm/errno.h>
+#include <errno.h>
 #include "../common.h"
 
 ssize_t n;
@@ -5,38 +9,57 @@ ssize_t n;
 typedef struct Client {
     int fd;
     char *name;
+    int autorized;
     struct Client *next;
 } ClientLinkedList;
 
 ClientLinkedList *init_list(int fd) {
     ClientLinkedList *temp = (ClientLinkedList *) malloc(sizeof(ClientLinkedList));
     temp->fd = fd;
+    temp->autorized = 0;
     temp->next = NULL;
     return temp;
 }
 
 ClientLinkedList *first, *last;
 
-pthread_mutex_t mutex;
+struct pollfd *sockets;
+int sockfd;
+int poll_size;
 
-void handle_connection(void *arg);
 void handleMessage(ClientLinkedList *client);
+
 void sendMessagesToAllClients(ClientLinkedList *author, char *buffer, u_int32_t bufferLength);
+
 void exit_and_free(ClientLinkedList *client);
+
 void handleName(ClientLinkedList *client);
 
+ClientLinkedList* findClientByFd(int fd);
+
 int main(int argc, char *argv[]) {
-    int sockfd, newsockfd;
     uint16_t portno;
     unsigned int clilen;
-
+    int temp_poll_size;
+    int state;
     struct sockaddr_in serv_addr, cli_addr;
-
+    poll_size = 1;
+    
     /* First call to socket() function */
     sockfd = socket(AF_INET, SOCK_STREAM, 0);
 
     if (sockfd < 0) {
         perror("ERROR opening socket");
+        exit(1);
+    }
+    int on = 1;
+    if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, (char *) &on, sizeof(on)) < 0) {
+        perror("ERROR on setsockopt");
+        exit(2);
+    }
+
+    if (fcntl(sockfd, F_SETFL, O_NONBLOCK) < 0) {
+        perror("ERROR making socket nonblock");
         exit(1);
     }
 
@@ -54,72 +77,126 @@ int main(int argc, char *argv[]) {
         exit(1);
     }
 
-    listen(sockfd, 5);
+    if (listen(sockfd, 5) < 0) {
+        perror("ERROR on listen");
+        exit(1);
+    }
+
     clilen = sizeof(cli_addr);
 
     first = init_list(sockfd);
     last = first;
 
-    if (pthread_mutex_init(&mutex, NULL) != 0) {
-        perror("ERROR creating mutex");
-        exit(1);
-    }
+    sockets = (struct pollfd *) malloc(sizeof(struct pollfd));
+
+    bzero(sockets, sizeof(sockets));
+    sockets[0].fd = sockfd;
+    sockets[0].events = POLLIN;
 
     pthread_t tid;
 
     while (1) {
-        ClientLinkedList *newClient = init_list(sockfd);
-        newsockfd = accept(sockfd, (struct sockaddr *) &cli_addr, &clilen);
-
-        if (newsockfd < 0) {
-            perror("ERROR on accept");
-            close(sockfd);
-            exit(1);
+        state = poll(sockets, poll_size, -1);
+        if (state < 0) {
+            perror("ERROR on poll");
+            break;
         }
 
-        newClient->fd = newsockfd;
-        last->next = newClient;
-        last = newClient;
+        temp_poll_size = poll_size;
+        for (int i = 0; i < temp_poll_size; i++) {
 
-        if (pthread_create(&tid, NULL, (void *) handle_connection, newClient) != 0) {
-            printf("thread has not created");
-            close(sockfd);
-            exit(1);
+            if (sockets[i].revents == 0) {
+                continue;
+            }
+
+            if (sockets[i].revents != POLLIN) {
+                printf("loop: %d\n", i);
+                perror("ERROR wrong revents\n");
+                exit(1);
+            }
+
+            if (sockets[i].fd == sockfd) {
+                state = accept(sockfd, (struct sockaddr *) &cli_addr, &clilen);
+
+                if (state < 0) {
+                    break;
+                }
+
+                poll_size++;
+                sockets = (struct pollfd *) realloc(sockets, poll_size * sizeof(struct pollfd));
+                sockets[poll_size - 1].fd = state;
+                sockets[poll_size - 1].events = POLLIN;
+
+                ClientLinkedList *newClient = (ClientLinkedList *) malloc(sizeof(ClientLinkedList));
+                newClient->fd = state;
+                newClient->autorized = 0;
+                newClient->next = NULL;
+                last->next = newClient;
+                last = newClient;
+
+            } else {
+                ClientLinkedList* client = findClientByFd(sockets[i].fd);
+                state = poll(&sockets[i], 1, -1);
+                if (state < 0) {
+                    perror("ERROR on poll");
+                    exit(1);
+                }
+                if (sockets[i].revents != POLLIN) {
+                    printf("ERROR wrong revents");
+                    exit(1);
+                }
+                if (client->autorized == 0) {
+                    handleName(client);
+                } else {
+                    handleMessage(client);
+                }
+            }
+
+
         }
+
     }
-
 }
 
-void handle_connection(void *arg) {
-    ClientLinkedList *client = (ClientLinkedList *) arg;
-    handleName(client);
-
-    while (1) {
-        handleMessage(client);
+ClientLinkedList* findClientByFd(int fd) {
+    ClientLinkedList *temp = first->next;
+    while (temp != NULL) {
+        if (temp->fd == fd) {
+            return temp;
+        }
+        temp = temp->next;
     }
+    exit(1);
 }
 
 void handleName(ClientLinkedList *client) {
     char *name_buffer;
     u_int32_t name_size = 0;
-    int r;
+    int state;
     printf("new Client connected\n");
-    if ((r = read(client->fd, &name_size, sizeof(u_int32_t))) < 0) {
+    if ((state = read(client->fd, &name_size, sizeof(u_int32_t))) < 0) {
+        if (errno != EWOULDBLOCK) {
+            perror("ERROR reading from socket");
+            exit(1);
+        }
         printf("ERROR reading from socket");
-    } else if (r == 0) {
+    } else if (state == 0) {
         exit_and_free(client);
     }
     client->name = (char *) malloc(name_size);
     name_buffer = (char *) malloc(name_size + 25 * sizeof(char));
 
-    if ((r = read_bytes(client->fd, name_buffer, name_size)) < 0) {
-        perror("ERROR reading from socket");
-        exit(1);
-    } else if(r == 0) {
+    if ((state = read_bytes(client->fd, name_buffer, name_size)) < 0) {
+        if (errno != EWOULDBLOCK) {
+            perror("ERROR reading from socket");
+            exit(1);
+        }
+    } else if (state == 0) {
         exit_and_free(client);
     } else {
         delete_line_break(name_buffer);
         strncpy(client->name, name_buffer, name_size);
+        client->autorized = 1;
         printf("%s connected to server\n", client->name);
 
         sprintf(name_buffer, "%s connected to server\n", client->name);
@@ -134,9 +211,11 @@ void handleMessage(ClientLinkedList *client) {
     int r;
     u_int32_t message_size = 0;
     r = read(client->fd, &message_size, sizeof(u_int32_t));
-    if (r < 0 ) {
-        perror("ERROR reading from socket");
-        exit(1);
+    if (r < 0) {
+        if (errno != EWOULDBLOCK) {
+            perror("ERROR reading from socket");
+            exit(1);
+        }
     } else if (r == 0) {
         exit_and_free(client);
     }
@@ -144,9 +223,11 @@ void handleMessage(ClientLinkedList *client) {
     message_buffer = (char *) malloc(message_size);
 
     if ((r = read_bytes(client->fd, message_buffer, message_size)) < 0) {
-        perror("ERROR reading from socket");
-        exit(1);
-    } else if(r == 0) {
+        if (errno != EWOULDBLOCK) {
+            perror("ERROR reading from socket");
+            exit(1);
+        }
+    } else if (r == 0) {
         exit_and_free(client);
     } else {
         delete_line_break(message_buffer);
@@ -169,24 +250,25 @@ void handleMessage(ClientLinkedList *client) {
 }
 
 void sendMessagesToAllClients(ClientLinkedList *author, char *buffer, u_int32_t bufferLength) {
-    ClientLinkedList *receiver = first->next;
-    pthread_mutex_lock(&mutex);
-    while (receiver != NULL) {
-        if (receiver != author) {
-            n = write(receiver->fd, &bufferLength, sizeof(u_int32_t));
+    int temp_fd = author->fd;
+    for (int j = 0; j < poll_size; j++) {
+        if (sockets[j].fd != sockfd && sockets[j].fd != temp_fd) {
+            n = write(sockets[j].fd, &bufferLength, sizeof(u_int32_t));
             if (n < 0) {
-                perror("ERROR writing to socket");
-                exit(1);
+                if (errno != EWOULDBLOCK) {
+                    perror("ERROR reading from socket");
+                    exit(1);
+                }
             }
-            n = write(receiver->fd, buffer, bufferLength);
+            n = write(sockets[j].fd, buffer, bufferLength);
             if (n < 0) {
-                perror("ERROR writing to socket");
-                exit(1);
+                if (errno != EWOULDBLOCK) {
+                    perror("ERROR reading from socket");
+                    exit(1);
+                }
             }
         }
-        receiver = receiver->next;
     }
-    pthread_mutex_unlock(&mutex);
 }
 
 void exit_and_free(ClientLinkedList *client) {
@@ -205,6 +287,6 @@ void exit_and_free(ClientLinkedList *client) {
         free(client);
         pthread_exit(NULL);
     }
-
 }
+
 
