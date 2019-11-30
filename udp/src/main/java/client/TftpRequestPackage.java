@@ -1,3 +1,5 @@
+package client;
+
 import java.nio.ByteBuffer;
 
 public class TftpRequestPackage {
@@ -29,7 +31,7 @@ public class TftpRequestPackage {
     /*
      * Сборка запроса
      */
-    public ByteBuffer build() {
+    public byte[] build() {
         byte zeroByte = 0;
         int rrqByteLength = 2 + fileName.length() + 1 + mode.length() + 1;
         byte[] rrqByteArray = new byte[rrqByteLength];
@@ -50,6 +52,6 @@ public class TftpRequestPackage {
             position++;
         }
         rrqByteArray[position] = zeroByte;
-        return ByteBuffer.wrap(rrqByteArray);
+        return rrqByteArray;
     }
 }
