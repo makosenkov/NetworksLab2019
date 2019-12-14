@@ -84,9 +84,16 @@ void sendMessages(void *arg) {
     char *buffer;
     u_int32_t buffer_size;
     while (1) {
-        buffer = NULL;
-        n = 0;
-        buffer_size = getline(&buffer, &n, stdin);
+        while (1) {
+            buffer = NULL;
+            n = 0;
+            printf("Enter message >");
+            buffer_size = getline(&buffer, &n, stdin);
+            if (buffer_size > 1) {
+                break;
+            }
+        }
+
 
         if (write(fd, &buffer_size, sizeof(u_int32_t)) < 0) {
             perror("ERROR writing to socket");
@@ -119,13 +126,21 @@ void receiveMessages(void *arg) {
             exit(1);
         }
 
+        if (buffer_size == 0) {
+            printf("\nServer is not available, disconnect\n");
+            close(fd);
+            exit(EXIT_SUCCESS);
+        }
+
         buffer = (char *) malloc(buffer_size);
         if (read(fd, buffer, buffer_size) < 0) {
             perror("ERROR reading from socket");
             exit(1);
         }
 
-        printf("%s\n", buffer);
+        printf("\n%s\n", buffer);
+        printf("Enter message >");
+        fflush(stdout);
         free(buffer);
     }
 }
