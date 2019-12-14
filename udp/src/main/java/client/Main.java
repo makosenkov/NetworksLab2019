@@ -13,13 +13,13 @@ public class Main {
             if (args[1].equals("get")) {
                 String[] files = new String[args.length - 2];
                 System.arraycopy(args, 2, files, 0, args.length - 2);
-                TftpClient tFTPClient = new TftpClient(address, 5000);
+                TftpClient tFTPClient = new TftpClient(address, 8080);
                 tFTPClient.getFiles(files);
                 System.out.println("received");
             } else if (args[1].equals("send")) {
                 String[] files = new String[args.length - 2];
                 System.arraycopy(args, 2, files, 0, args.length - 2);
-                TftpClient tFTPClient = new TftpClient(address, 5000);
+                TftpClient tFTPClient = new TftpClient(address, 8080);
                 tFTPClient.sendFiles(files);
             }
         }
