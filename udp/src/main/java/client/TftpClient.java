@@ -1,13 +1,14 @@
 package client;
 
+import utils.TftpDataPacket;
+import utils.TftpUtils;
+
 import java.io.*;
 import java.net.*;
 import java.nio.file.Files;
-import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.nio.file.StandardOpenOption;
-import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 
 public class TftpClient {
 
@@ -23,8 +24,7 @@ public class TftpClient {
     private static final byte OP_DATAPACKET = 3;
     private static final byte OP_ACK = 4;
     private static final byte OP_ERROR = 5;
-    private static final int DATA_PACKET_SIZE = 516;
-    private static final int DATA_PACKET_CONTENT_SIZE = 512;
+    private static final int DATA_PACKET_SIZE = 2052;
     private static final int ACK_PACKET_SIZE = 4;
 
     public TftpClient(String address, int port) {
@@ -66,7 +66,7 @@ public class TftpClient {
 
         switch (opCode) {
             case OP_ERROR:
-                System.out.println("Error package received");
+                System.out.println("Принят пакет с кодом ошибки");
 
             case OP_ACK:
 
@@ -80,25 +80,32 @@ public class TftpClient {
     }
 
     private void sendFilePackets(String filename, SocketAddress address) throws IOException {
-        List<TftpDataPacket> packets = getPacketListFromFile(filename);
+        List<TftpDataPacket> packets = TftpUtils.getPacketListFromFile(filename);
+        datagramSocket.setSoTimeout(50000);
+        sendPackets:
+        for (TftpDataPacket tftpDataPacket : packets) {
+            while (true) {
+                try {
+                    DatagramPacket sendPack = new DatagramPacket(tftpDataPacket.getPacket(), tftpDataPacket.getPacket().length, address);
 
-        for (int i = 0; i < packets.size(); i++) {
-            TftpDataPacket packet = packets.get(i);
-            DatagramPacket sendPack = new DatagramPacket(packet.getPacket(), packet.getPacket().length, address);
-
-            datagramSocket.send(sendPack);
-            // Ответ от сервера
-            byte[] bufferByteArray = new byte[ACK_PACKET_SIZE];
-            incomingDatagramPacket = new DatagramPacket(
-                bufferByteArray,
-                bufferByteArray.length,
-                inetAddress,
-                datagramSocket.getLocalPort()
-            );
-            datagramSocket.receive(incomingDatagramPacket);
-            int ackBlockNumber = Byte.toUnsignedInt(bufferByteArray[2]) + Byte.toUnsignedInt(bufferByteArray[3]);
-            if (ackBlockNumber == packet.getBlockNumber()) {
-                System.out.println("Подтверджена отправка пакета №: " + ackBlockNumber);
+                    datagramSocket.send(sendPack);
+                    // Ответ от клиента
+                    byte[] bufferByteArray = new byte[ACK_PACKET_SIZE];
+                    incomingDatagramPacket = new DatagramPacket(
+                        bufferByteArray,
+                        bufferByteArray.length,
+                        address
+                    );
+                    datagramSocket.receive(incomingDatagramPacket);
+                    int ackBlockNumber = Byte.toUnsignedInt(bufferByteArray[2]) + Byte.toUnsignedInt(bufferByteArray[3]);
+                    if (ackBlockNumber == tftpDataPacket.getBlockNumber()) {
+                        System.out.println("Подтверджена отправка пакета №: " + ackBlockNumber);
+                        break;
+                    }
+                } catch (SocketTimeoutException e) {
+                    System.out.println("Timeout fail");
+                    break sendPackets;
+                }
             }
         }
 
@@ -116,62 +123,16 @@ public class TftpClient {
 
     private DatagramPacket createDatagramPacketForRequest(byte opcode, String fileName) throws IOException {
         inetAddress = InetAddress.getByName(TFTP_SERVER_ADDRESS);
-        byte[] requestByteArray = buildRequest(opcode, fileName, "octet");
+        byte[] requestByteArray = TftpUtils.buildRequest(opcode, fileName, "octet");
         return new DatagramPacket(requestByteArray,
             requestByteArray.length, inetAddress, TFTP_SERVER_PORT);
-    }
-
-    public byte[] buildRequest(byte opCode, String fileName, String mode) {
-        byte zeroByte = 0;
-        int rrqByteLength = 2 + fileName.length() + 1 + mode.length() + 1;
-        byte[] rrqByteArray = new byte[rrqByteLength];
-
-        rrqByteArray[0] = zeroByte;
-        rrqByteArray[1] = opCode;
-        int position = 2;
-        //пишем filename
-        for (int i = 0; i < fileName.length(); i++) {
-            rrqByteArray[position] = (byte) fileName.charAt(i);
-            position++;
-        }
-        rrqByteArray[position] = zeroByte;
-        position++;
-        // пишем mode
-        for (int i = 0; i < mode.length(); i++) {
-            rrqByteArray[position] = (byte) mode.charAt(i);
-            position++;
-        }
-        rrqByteArray[position] = zeroByte;
-        return rrqByteArray;
-    }
-
-    private List<TftpDataPacket> getPacketListFromFile(String filename) throws IOException {
-        byte[] fileBytes = Files.readAllBytes(Paths.get(filename));
-        int numberOfPackets = fileBytes.length / DATA_PACKET_CONTENT_SIZE + 1; //обеспечиваем неполный последний пакет
-        List<TftpDataPacket> packetList = new ArrayList<>();
-        for (int i = 0; i < numberOfPackets - 1; i++)     //Последний пакет пока не создаем
-        {
-            byte[] data = new byte[DATA_PACKET_CONTENT_SIZE];
-            System.arraycopy(fileBytes, i * 512, data, 0, data.length);
-            TftpDataPacket toAdd = new TftpDataPacket(data, (i + 1));
-            packetList.add(toAdd);
-        }
-        int startIOfLastBytes = DATA_PACKET_CONTENT_SIZE * (numberOfPackets - 1);
-        int bytesLeft = fileBytes.length - startIOfLastBytes;
-        byte[] lastPack = new byte[bytesLeft];
-        for (int j = startIOfLastBytes; j < fileBytes.length; j++) {
-            lastPack[j % DATA_PACKET_CONTENT_SIZE] = fileBytes[j];
-        }
-        TftpDataPacket last = new TftpDataPacket(lastPack, numberOfPackets);
-        packetList.add(last);
-        return packetList;
     }
 
     /*
      * Принимаем пакеты
      */
     private void receivePackage(String filename) throws IOException {
-        ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
+        Files.deleteIfExists(Paths.get(filename));
         do {
             byte[] bufferByteArray = new byte[DATA_PACKET_SIZE];
             incomingDatagramPacket = new DatagramPacket(
@@ -185,32 +146,20 @@ public class TftpClient {
 
             switch (opCode) {
                 case OP_ERROR:
-                    System.out.println("Error package received");
+                    System.out.println("Принят пакет с кодом ошибки");
 
                 case OP_DATAPACKET:
 
                     byte[] packetBlockNumber = {bufferByteArray[2], bufferByteArray[3]};
 
-                    DataOutputStream dos = new DataOutputStream(byteArrayOutputStream);
-                    dos.write(incomingDatagramPacket.getData(), 4, incomingDatagramPacket.getLength() - 4);
-                    sendAcknowledgment(packetBlockNumber, incomingDatagramPacket.getAddress());
-                    writeToFile(byteArrayOutputStream.toByteArray(), filename);
-                    byteArrayOutputStream.reset();
+                    try (ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
+                         DataOutputStream dos = new DataOutputStream(byteArrayOutputStream)) {
+                        dos.write(incomingDatagramPacket.getData(), 4, incomingDatagramPacket.getLength() - 4);
+                        sendAcknowledgment(packetBlockNumber, incomingDatagramPacket.getAddress());
+                        TftpUtils.writeToFile(byteArrayOutputStream.toByteArray(), filename);
+                    }
             }
-        } while (!isLastPacket(incomingDatagramPacket));
-    }
-
-    private void writeToFile(byte[] bytes, String filename) throws IOException {
-        if (Paths.get(filename).toFile().exists()) {
-            System.out.println(bytes.length);
-            Files.write(Paths.get(filename), bytes, StandardOpenOption.APPEND);
-        } else {
-            Files.write(Paths.get(filename), bytes, StandardOpenOption.CREATE_NEW);
-        }
-    }
-
-    private boolean isLastPacket(DatagramPacket packet) {
-        return packet.getLength() < 512;
+        } while (TftpUtils.isNotLastPacket(incomingDatagramPacket));
     }
 
     /*
@@ -221,6 +170,37 @@ public class TftpClient {
         DatagramPacket ack = new DatagramPacket(ACK, ACK.length, inetAddress,
             incomingDatagramPacket.getPort());
         datagramSocket.send(ack);
+    }
+
+    public static void main(String[] args) throws Exception {
+        String address = null;
+        String port = null;
+        if (args[0] != null) {
+            address = args[0];
+        } else {
+            System.out.println("Wrong arguments: host address");
+        }
+        if (args[1] != null) {
+            port = args[1];
+        } else {
+            System.out.println("Wrong arguments: port");
+        }
+        if (args[2] != null) {
+
+            if (args[2].equals("get")) {
+                String[] files = new String[args.length - 3];
+                System.arraycopy(args, 3, files, 0, args.length - 3);
+                TftpClient tFTPClient = new TftpClient(address, Integer.parseInt(Objects.requireNonNull(port)));
+                tFTPClient.getFiles(files);
+                System.out.println("received");
+            } else if (args[2].equals("send")) {
+                String[] files = new String[args.length - 3];
+                System.arraycopy(args, 3, files, 0, args.length - 3);
+                TftpClient tFTPClient = new TftpClient(address, Integer.parseInt(Objects.requireNonNull(port)));
+                tFTPClient.sendFiles(files);
+            }
+        }
+
     }
 
 }

@@ -1,4 +1,4 @@
-package client;
+package utils;
 
 public class TftpDataPacket {
 
@@ -7,9 +7,9 @@ public class TftpDataPacket {
 
     public TftpDataPacket(byte[] data, int blockNumber)
     {
-        if (data.length > 512)
+        if (data.length > 4098)
         {
-            throw new IllegalArgumentException("Длина пакета не может превышать 512 байт");
+            throw new IllegalArgumentException("Длина пакета не может превышать 4098 байт");
         }
         this.blockNumber = blockNumber;
         packet = new byte[data.length + 4];

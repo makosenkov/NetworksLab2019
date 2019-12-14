@@ -1,0 +1,171 @@
+package server;
+
+import utils.TftpDataPacket;
+import utils.TftpUtils;
+
+import java.io.ByteArrayOutputStream;
+import java.io.DataOutputStream;
+import java.io.IOException;
+import java.net.*;
+import java.nio.file.Files;
+import java.nio.file.Paths;
+import java.util.List;
+
+public class TftpServer implements Runnable {
+
+    private DatagramSocket datagramSocket;
+    private InetAddress inetAddress = null;
+    private DatagramPacket incomingDatagramPacket;
+    private String dir;
+    private static final byte OP_RRQ = 1;
+    private static final byte OP_WRQ = 2;
+    private static final byte OP_DATAPACKET = 3;
+    private static final byte OP_ACK = 4;
+    private static final byte OP_ERROR = 5;
+    private static final int DATA_PACKET_SIZE = 2052;
+    private static final int ACK_PACKET_SIZE = 4;
+
+    public TftpServer(String address, int port, String dir) throws SocketException {
+        datagramSocket = new DatagramSocket(null);
+        SocketAddress socketAddress = new InetSocketAddress(address, port);
+        datagramSocket.bind(socketAddress);
+        datagramSocket.setReuseAddress(true);
+        this.dir = dir;
+    }
+
+    private void sendFilePackets(String filename, SocketAddress address) throws IOException {
+        List<TftpDataPacket> packets = TftpUtils.getPacketListFromFile(filename);
+        datagramSocket.setSoTimeout(50000);
+        sendPackets: for (TftpDataPacket tftpDataPacket : packets) {
+            while (true) {
+                try {
+                    DatagramPacket sendPack = new DatagramPacket(tftpDataPacket.getPacket(), tftpDataPacket.getPacket().length, address);
+
+                    datagramSocket.send(sendPack);
+                    // Ответ от клиента
+                    byte[] bufferByteArray = new byte[ACK_PACKET_SIZE];
+                    incomingDatagramPacket = new DatagramPacket(
+                        bufferByteArray,
+                        bufferByteArray.length,
+                        address
+                    );
+                    datagramSocket.receive(incomingDatagramPacket);
+                    int ackBlockNumber = Byte.toUnsignedInt(bufferByteArray[2]) + Byte.toUnsignedInt(bufferByteArray[3]);
+                    if (ackBlockNumber == tftpDataPacket.getBlockNumber()) {
+                        System.out.println("Подтверджена отправка пакета №: " + ackBlockNumber);
+                        break;
+                    }
+                } catch (SocketTimeoutException e) {
+                    System.out.println("Timeout fail");
+                    break sendPackets;
+                }
+            }
+        }
+
+    }
+
+    /*
+     * Принимаем пакеты
+     */
+    private void receivePackage(String filename) throws IOException {
+        Files.deleteIfExists(Paths.get(dir + filename));
+        do {
+            byte[] bufferByteArray = new byte[DATA_PACKET_SIZE];
+            incomingDatagramPacket = new DatagramPacket(
+                bufferByteArray,
+                bufferByteArray.length,
+                inetAddress,
+                datagramSocket.getLocalPort()
+            );
+            datagramSocket.receive(incomingDatagramPacket);
+            byte opCode = bufferByteArray[1];
+
+            switch (opCode) {
+                case OP_ERROR:
+                    System.out.println("Принят пакет с кодом ошибки");
+
+                case OP_DATAPACKET:
+
+                    byte[] packetBlockNumber = {bufferByteArray[2], bufferByteArray[3]};
+
+                    try (ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
+                         DataOutputStream dos = new DataOutputStream(byteArrayOutputStream)) {
+                        dos.write(incomingDatagramPacket.getData(), 4, incomingDatagramPacket.getLength() - 4);
+                        sendAcknowledgment(packetBlockNumber, incomingDatagramPacket.getAddress());
+                        TftpUtils.writeToFile(byteArrayOutputStream.toByteArray(), dir + filename);
+                    }
+            }
+        } while (TftpUtils.isNotLastPacket(incomingDatagramPacket));
+
+    }
+
+    /*
+     * Отправляем ACK после прочтения
+     */
+    private void sendAcknowledgment(byte[] blockNumber, InetAddress inetAddress) throws IOException {
+        byte[] ACK = {0, OP_ACK, blockNumber[0], blockNumber[1]};
+        DatagramPacket ack = new DatagramPacket(ACK, ACK.length, inetAddress,
+            incomingDatagramPacket.getPort());
+        datagramSocket.send(ack);
+    }
+
+    @Override
+    public void run() {
+        while (true) {
+            byte[] bufferByteArray = new byte[DATA_PACKET_SIZE];
+            incomingDatagramPacket = new DatagramPacket(
+                bufferByteArray,
+                bufferByteArray.length
+            );
+            try {
+                System.out.println("Ожидание запроса");
+                datagramSocket.receive(incomingDatagramPacket);
+            } catch (IOException e) {
+                System.out.println("Ошибка при приеме запроса");
+            }
+            byte opCode = bufferByteArray[1];
+
+            switch (opCode) {
+                case OP_ERROR:
+                    System.out.println("Принят пакет с флагом ошибки");
+
+                case OP_WRQ:
+
+                    try {
+                        String filename = TftpUtils.parseFilenameFromBytes(bufferByteArray);
+                        sendAcknowledgment(new byte[] {0, 0}, incomingDatagramPacket.getAddress());
+                        System.out.println("Принят запрос на запись");
+
+                        receivePackage(filename);
+                        continue;
+                    } catch (IOException e) {
+                        System.out.println("Не удалось отправить ACK на запись");
+                    }
+                case OP_RRQ:
+                    try {
+                        String filename = TftpUtils.parseFilenameFromBytes(bufferByteArray);
+                        System.out.println("Принят запрос на чтение");
+                        sendFilePackets(dir + filename, incomingDatagramPacket.getSocketAddress());
+                    } catch (IOException e) {
+                        System.out.println("Не удалось отправить ACK на чтение");
+                    }
+            }
+        }
+    }
+
+
+
+    public static void main(String[] args) {
+        TftpServer server = null;
+        try {
+            server = new TftpServer("192.168.0.94", 8080, "/home/mksnkv/storage/");
+        } catch (SocketException e) {
+            e.printStackTrace();
+        }
+        if (server != null) {
+            server.run();
+        } else {
+            System.out.println("не удалось запустить сервер");
+        }
+    }
+}
