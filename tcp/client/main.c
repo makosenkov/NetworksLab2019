@@ -16,7 +16,7 @@ int main(int argc, char *argv[]) {
     struct sockaddr_in serv_addr;
     struct hostent *server;
     char *name;
-    u_int32_t name_size;
+    uint32_t name_size;
     n = 0;
     struct pollfd read_sock;
 
@@ -60,7 +60,7 @@ int main(int argc, char *argv[]) {
 
     name_size = getline(&name, &n, stdin);
 
-    if (write(sockfd, &name_size, sizeof(u_int32_t)) < 0) {
+    if (write(sockfd, &name_size, sizeof(uint32_t)) < 0) {
         perror("ERROR writing to socket");
         exit(1);
     }
@@ -93,13 +93,13 @@ int main(int argc, char *argv[]) {
 void sendMessages(void *arg) {
     int fd = *(int *) arg;
     char *buffer;
-    u_int32_t buffer_size;
+    uint32_t buffer_size;
     while (1) {
         buffer = NULL;
         n = 0;
         buffer_size = getline(&buffer, &n, stdin);
 
-        if (write(fd, &buffer_size, sizeof(u_int32_t)) < 0) {
+        if (write(fd, &buffer_size, sizeof(int)) < 0) {
             perror("ERROR writing to socket");
             exit(1);
         }
@@ -122,7 +122,7 @@ void receiveMessages(void *arg) {
     struct pollfd fd = *(struct pollfd *) arg;
     int state;
     char *buffer;
-    u_int32_t buffer_size;
+    uint32_t buffer_size;
     while (1) {
         state = poll(&fd, 1, -1);
         if (state < 0) {
@@ -138,9 +138,11 @@ void receiveMessages(void *arg) {
             printf("ERROR wrong revents");
             exit(1);
         }
+        printf("read poll done\n");
+        fflush(stdout);
         buffer_size = 0;
 
-        if ((state = read(fd.fd, &buffer_size, sizeof(u_int32_t)) < 0)) {
+        if ((state = read(fd.fd, &buffer_size, sizeof(int)) < 0)) {
             if (errno != EWOULDBLOCK) {
                 perror("ERROR reading size from socket");
                 disconnect();
@@ -151,16 +153,21 @@ void receiveMessages(void *arg) {
             printf("\rThis socket is closed\n");
             disconnect();
         }
+        printf("read size\n");
+        fflush(stdout);
 
         state = poll(&fd, 1, -1);
+        printf("sec poll\n");
+        fflush(stdout);
         if (state < 0) {
             perror("ERROR on poll");
             exit(1);
-        } else if (state != POLLIN) {
+        } else if (fd.revents != POLLIN) {
             printf("ERROR wrong revents");
             exit(1);
         }
-
+        printf("sec poll done\n");
+        fflush(stdout);
         buffer = (char *) malloc(buffer_size);
         if (read(fd.fd, buffer, buffer_size) < 0) {
             if (errno != EWOULDBLOCK) {
@@ -168,6 +175,8 @@ void receiveMessages(void *arg) {
                 disconnect();
             }
         }
+        printf("read msg\n");
+        fflush(stdout);
         printf("\r");
         printf("%s\n", buffer);
         free(buffer);
