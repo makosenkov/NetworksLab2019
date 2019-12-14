@@ -10,6 +10,7 @@ import java.net.*;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.List;
+import java.util.Objects;
 
 public class TftpServer implements Runnable {
 
@@ -36,7 +37,8 @@ public class TftpServer implements Runnable {
     private void sendFilePackets(String filename, SocketAddress address) throws IOException {
         List<TftpDataPacket> packets = TftpUtils.getPacketListFromFile(filename);
         datagramSocket.setSoTimeout(50000);
-        sendPackets: for (TftpDataPacket tftpDataPacket : packets) {
+        sendPackets:
+        for (TftpDataPacket tftpDataPacket : packets) {
             while (true) {
                 try {
                     DatagramPacket sendPack = new DatagramPacket(tftpDataPacket.getPacket(), tftpDataPacket.getPacket().length, address);
@@ -154,11 +156,29 @@ public class TftpServer implements Runnable {
     }
 
 
-
     public static void main(String[] args) {
+        String address = null;
+        String port = null;
+        String dir; //абочая директория
+        if (args[0] != null) {
+            address = args[0];
+        } else {
+            System.out.println("Wrong arguments: host address");
+        }
+        if (args[1] != null) {
+            port = args[1];
+        } else {
+            System.out.println("Wrong arguments: port");
+        }
+        if (args[2] != null) {
+            dir = args[2];
+        } else {
+            dir = "/home";
+        }
+
         TftpServer server = null;
         try {
-            server = new TftpServer("192.168.0.94", 8080, "/home/mksnkv/storage/");
+            server = new TftpServer(address, Integer.parseInt(Objects.requireNonNull(port)), dir);
         } catch (SocketException e) {
             e.printStackTrace();
         }
