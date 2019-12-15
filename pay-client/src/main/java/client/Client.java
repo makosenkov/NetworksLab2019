@@ -35,6 +35,8 @@ public class Client {
             System.out.println("\r" + s);
             System.out.print("> ");
         }
+        con_br.close();
+        clientWriter.interrupt();
         sock.close();
     }
 
@@ -50,7 +52,10 @@ public class Client {
                     sock_pw.println("signin " + s);
                     s = sock_br.readLine();
                     System.out.println(s);
-                    if(s.equals("Enter complete")) return;
+                    if(s.equals("Enter complete")) {
+                        System.out.println("Write \"help\" for help");
+                        return;
+                    }
                     else break;
                 case "2":
                     System.out.print("Create login: ");
@@ -58,7 +63,10 @@ public class Client {
                     sock_pw.println("signup " + s);
                     s = sock_br.readLine();
                     System.out.println(s);
-                    if(s.equals("Enter complete")) return;
+                    if(s.equals("Enter complete")) {
+                        System.out.println("Write \"help\" for help");
+                        return;
+                    }
                     else break;
                 default:
                     break;

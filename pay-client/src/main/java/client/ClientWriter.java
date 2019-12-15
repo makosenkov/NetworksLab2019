@@ -19,10 +19,11 @@ public class ClientWriter extends Thread {
             while (true) {
                 System.out.print("> ");
                 s = con_br.readLine();
-                if (s.equals("/exit")) return;
-                if (s != null)
+                if(isInterrupted()) return;
+                if (s != null) {
                     sock_pw.println(s);
-                else
+                    if (s.equals("/exit")) return;
+                } else
                     break;
             }
         } catch (Exception e) {
