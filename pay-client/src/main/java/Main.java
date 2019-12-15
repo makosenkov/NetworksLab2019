@@ -1,3 +1,5 @@
+import client.Client;
+
 import java.net.ConnectException;
 import java.util.Scanner;
 
@@ -32,12 +34,12 @@ public class Main {
             }
             Client client;
             try {
-                client = new Client(host, port);
-                client.runClient();
+                client = new Client(Integer.parseInt(port), host);
+                client.run();
             } catch (ConnectException e) {
                 System.out.println("сервер не доступен по данному адресу");
             } catch (Exception e) {
-                System.out.println("шото пошло не так");
+                System.out.println("Что-то пошло не так");
                 e.printStackTrace();
             }
         }
