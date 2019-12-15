@@ -1,48 +1,22 @@
 import client.Client;
 
+import java.io.IOException;
 import java.net.ConnectException;
 import java.util.Scanner;
 
 public class Main {
 
     public static void main(String[] args) {
-        System.out.println("== Добро пожаловать, Агент 62349А ==");
-        System.out.println("=====      Помощь - /help      =====");
-        while (true) {
-            Scanner scanner = new Scanner(System.in);
-            System.out.println("Введите имя хоста:");
-            String host = scanner.nextLine();
-            switch (host) {
-                case "/help":
-                    System.out.println("/exit - выход");
-                    return;
-                case "/exit":
-                    System.out.println("Выход из системы...");
-                    System.out.println("Удачного дня!");
-                    return;
+        try {
+            if (args[0] != null && args[1] != null) {
+                new Client(Integer.parseInt(args[0]), args[1]).run();
+            } else {
+                System.out.println("Wrong arguments");
             }
-            System.out.println("Введите порт:");
-            String port = scanner.nextLine();
-            switch (port) {
-                case "/help":
-                    System.out.println("/exit - выход");
-                    continue;
-                case "/exit":
-                    System.out.println("Выход из системы...");
-                    System.out.println("Удачного дня!");
-                    return;
-            }
-            Client client;
-            try {
-                client = new Client(Integer.parseInt(port), host);
-                client.run();
-            } catch (ConnectException e) {
-                System.out.println("сервер не доступен по данному адресу");
-            } catch (Exception e) {
-                System.out.println("Что-то пошло не так");
-                e.printStackTrace();
-            }
+        } catch (Exception e) {
+            System.out.println("Something gone wrong");
         }
+
     }
 
 }

@@ -35,9 +35,8 @@ public class Client {
             System.out.println("\r" + s);
             System.out.print("> ");
         }
-        con_br.close();
-        clientWriter.interrupt();
         sock.close();
+        System.exit(0);
     }
 
     private void enter() throws IOException {

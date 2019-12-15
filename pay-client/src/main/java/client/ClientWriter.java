@@ -19,7 +19,6 @@ public class ClientWriter extends Thread {
             while (true) {
                 System.out.print("> ");
                 s = con_br.readLine();
-                if(isInterrupted()) return;
                 if (s != null) {
                     sock_pw.println(s);
                     if (s.equals("/exit")) return;
