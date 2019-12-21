@@ -9,27 +9,35 @@ import java.util.ArrayList;
 import java.util.List;
 
 public class TftpUtils {
-    private static final int DATA_PACKET_CONTENT_SIZE = 2048;
+    private static final int DATA_PACKET_SIZE = 516;
+    private static final int DATA_PACKET_CONTENT_SIZE = 512;
 
     public static List<TftpDataPacket> getPacketListFromFile(String filename) throws IOException {
         byte[] fileBytes = Files.readAllBytes(Paths.get(filename));
-        int numberOfPackets = fileBytes.length / DATA_PACKET_CONTENT_SIZE + 1; //обеспечиваем неполный последний пакет
         List<TftpDataPacket> packetList = new ArrayList<>();
-        for (int i = 0; i < numberOfPackets - 1; i++)     //Последний пакет пока не создаем
-        {
-            byte[] data = new byte[DATA_PACKET_CONTENT_SIZE];
-            System.arraycopy(fileBytes, i * DATA_PACKET_CONTENT_SIZE, data, 0, data.length);
-            TftpDataPacket toAdd = new TftpDataPacket(data, (i + 1));
-            packetList.add(toAdd);
+        int offset = 0;
+        int blockNumber = 1 ;
+        while (offset < fileBytes.length) {
+            byte[] packet;
+            int j = 0;
+            if (offset + DATA_PACKET_CONTENT_SIZE >= fileBytes.length) {
+                packet = new byte[fileBytes.length - offset];
+                for (int i = offset; i < fileBytes.length; i++) {
+                    packet[j] = fileBytes[i];
+                    j++;
+                }
+            } else {
+                packet = new byte[DATA_PACKET_CONTENT_SIZE];
+                for (int i = offset; i < offset + DATA_PACKET_CONTENT_SIZE; i++) {
+                    packet[j] = fileBytes[i];
+                    j++;
+                }
+            }
+            TftpDataPacket tftpDataPacket = new TftpDataPacket(packet, blockNumber);
+            packetList.add(tftpDataPacket);
+            offset += DATA_PACKET_CONTENT_SIZE;
+            blockNumber++;
         }
-        int startIOfLastBytes = DATA_PACKET_CONTENT_SIZE * (numberOfPackets - 1);
-        int bytesLeft = fileBytes.length - startIOfLastBytes;
-        byte[] lastPack = new byte[bytesLeft];
-        for (int j = startIOfLastBytes; j < fileBytes.length; j++) {
-            lastPack[j % DATA_PACKET_CONTENT_SIZE] = fileBytes[j];
-        }
-        TftpDataPacket last = new TftpDataPacket(lastPack, numberOfPackets);
-        packetList.add(last);
         return packetList;
     }
 
@@ -51,7 +59,8 @@ public class TftpUtils {
     }
 
     public static boolean isNotLastPacket(DatagramPacket packet) {
-        return packet.getLength() >= DATA_PACKET_CONTENT_SIZE;
+        int length =  packet.getData().length;
+        return length >= DATA_PACKET_SIZE;
     }
 
     public static String parseFilenameFromBytes(byte[] bufferByteArray) {

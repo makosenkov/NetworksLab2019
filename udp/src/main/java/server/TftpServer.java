@@ -23,7 +23,7 @@ public class TftpServer implements Runnable {
     private static final byte OP_DATAPACKET = 3;
     private static final byte OP_ACK = 4;
     private static final byte OP_ERROR = 5;
-    private static final int DATA_PACKET_SIZE = 2052;
+    private static final int DATA_PACKET_SIZE = 516;
     private static final int ACK_PACKET_SIZE = 4;
 
     public TftpServer(String address, int port, String dir) throws SocketException {
@@ -31,7 +31,7 @@ public class TftpServer implements Runnable {
         SocketAddress socketAddress = new InetSocketAddress(address, port);
         datagramSocket.bind(socketAddress);
         datagramSocket.setReuseAddress(true);
-        this.dir = dir;
+        this.dir = dir + "/";
     }
 
     private void sendFilePackets(String filename, SocketAddress address) throws IOException {
@@ -39,31 +39,55 @@ public class TftpServer implements Runnable {
         datagramSocket.setSoTimeout(50000);
         sendPackets:
         for (TftpDataPacket tftpDataPacket : packets) {
+            sending:
             while (true) {
                 try {
                     DatagramPacket sendPack = new DatagramPacket(tftpDataPacket.getPacket(), tftpDataPacket.getPacket().length, address);
 
-                    datagramSocket.send(sendPack);
-                    // Ответ от клиента
-                    byte[] bufferByteArray = new byte[ACK_PACKET_SIZE];
-                    incomingDatagramPacket = new DatagramPacket(
-                        bufferByteArray,
-                        bufferByteArray.length,
-                        address
-                    );
-                    datagramSocket.receive(incomingDatagramPacket);
-                    int ackBlockNumber = Byte.toUnsignedInt(bufferByteArray[2]) + Byte.toUnsignedInt(bufferByteArray[3]);
-                    if (ackBlockNumber == tftpDataPacket.getBlockNumber()) {
-                        System.out.println("Подтверджена отправка пакета №: " + ackBlockNumber);
-                        break;
+                    Thread th = new Thread(() -> {
+                        for (int i = 0; i < 25; i++) {
+                            try {
+                                if (i % 5 == 0) {
+                                    try {
+                                        datagramSocket.send(sendPack);
+                                        System.out.println("отправлен пакет " + tftpDataPacket.getBlockNumber());
+                                    } catch (IOException e) {
+                                        e.printStackTrace();
+                                    }
+                                }
+                                Thread.sleep(1000);
+                                if (Thread.interrupted()) {
+                                    break;
+                                }
+                            } catch (InterruptedException e) {
+                                break;
+                            }
+                        }
+                    });
+
+                    th.start();
+                    while (true) {
+                        byte[] bufferByteArray = new byte[ACK_PACKET_SIZE];
+                        incomingDatagramPacket = new DatagramPacket(
+                            bufferByteArray,
+                            bufferByteArray.length,
+                            address
+                        );
+                        datagramSocket.receive(incomingDatagramPacket);
+                        int ackBlockNumber = Byte.toUnsignedInt(bufferByteArray[2]) * 256 + Byte.toUnsignedInt(bufferByteArray[3]);
+                        if (ackBlockNumber == tftpDataPacket.getBlockNumber()) {
+                            System.out.println("Подтверджена отправка пакета №: " + ackBlockNumber);
+                            th.interrupt();
+                            break sending;
+                        }
                     }
+                    // Ответ от клиента
                 } catch (SocketTimeoutException e) {
                     System.out.println("Timeout fail");
                     break sendPackets;
                 }
             }
         }
-
     }
 
     /*
@@ -71,7 +95,8 @@ public class TftpServer implements Runnable {
      */
     private void receivePackage(String filename) throws IOException {
         Files.deleteIfExists(Paths.get(dir + filename));
-        do {
+        loop:
+        while (true) {
             byte[] bufferByteArray = new byte[DATA_PACKET_SIZE];
             incomingDatagramPacket = new DatagramPacket(
                 bufferByteArray,
@@ -89,16 +114,20 @@ public class TftpServer implements Runnable {
                 case OP_DATAPACKET:
 
                     byte[] packetBlockNumber = {bufferByteArray[2], bufferByteArray[3]};
-
+                    if (incomingDatagramPacket.getLength() < 512) {
+                        System.out.println("last");
+                    }
                     try (ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
                          DataOutputStream dos = new DataOutputStream(byteArrayOutputStream)) {
                         dos.write(incomingDatagramPacket.getData(), 4, incomingDatagramPacket.getLength() - 4);
                         sendAcknowledgment(packetBlockNumber, incomingDatagramPacket.getAddress());
                         TftpUtils.writeToFile(byteArrayOutputStream.toByteArray(), dir + filename);
+                        if (byteArrayOutputStream.toByteArray().length < 512) {
+                            break loop;
+                        }
                     }
             }
-        } while (TftpUtils.isNotLastPacket(incomingDatagramPacket));
-
+        }
     }
 
     /*
